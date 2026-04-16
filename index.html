@@ -1,0 +1,752 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
+    <title>BREATH FIELD</title>
+    <style>
+        :root {
+            --bg: #050508;
+            --font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-touch-callout: none;
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100dvw;
+            height: 100dvh;
+            overflow: hidden;
+            background-color: var(--bg);
+            font-family: var(--font);
+            color: #ffffff;
+            touch-action: none;
+            overscroll-behavior: none;
+        }
+
+        #glcanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+
+        .ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            pointer-events: none;
+        }
+
+        /* Intro Screen */
+        #intro {
+            position: absolute;
+            inset: 0;
+            background: var(--bg);
+            z-index: 50;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            transition: opacity 1.5s cubic-bezier(0.4, 0, 0.2, 1);
+            pointer-events: auto;
+            cursor: pointer;
+        }
+
+        .title {
+            font-size: 1.5rem;
+            font-weight: 300;
+            letter-spacing: 0.2em;
+            opacity: 0.9;
+            margin-bottom: 1rem;
+        }
+
+        .subtext {
+            font-size: 0.75rem;
+            font-weight: 400;
+            opacity: 0.5;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            animation: pulse 3s infinite alternate;
+        }
+
+        /* HUD */
+        #hud {
+            opacity: 0;
+            transition: opacity 2s ease;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: env(safe-area-inset-top, 20px) 0 env(safe-area-inset-bottom, 40px) 0;
+        }
+
+        .center-hud {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #phase-text {
+            font-size: 3rem;
+            font-weight: 200;
+            letter-spacing: 0.15em;
+            opacity: 0;
+            transition: opacity 1s ease;
+            text-transform: uppercase;
+        }
+
+        .progress-container {
+            margin-top: 2rem;
+            width: 120px;
+            height: 1px;
+            background: rgba(255, 255, 255, 0.15);
+            position: relative;
+        }
+
+        #progress-bar {
+            position: absolute;
+            left: 0;
+            top: 0;
+            height: 100%;
+            width: 0%;
+            background: rgba(255, 255, 255, 0.8);
+            box-shadow: 0 0 10px rgba(255, 255, 255, 0.4);
+            transform-origin: left center;
+        }
+
+        .bottom-hud {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding-bottom: 2rem;
+            pointer-events: auto;
+        }
+
+        #cycle-counter {
+            font-size: 0.7rem;
+            font-weight: 500;
+            letter-spacing: 0.1em;
+            opacity: 0.4;
+            margin-bottom: 1.5rem;
+        }
+
+        .ctrl-btn {
+            width: 56px;
+            height: 56px;
+            border-radius: 28px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            opacity: 0.3;
+        }
+
+        .ctrl-btn:active {
+            opacity: 0.8;
+            background: rgba(255, 255, 255, 0.1);
+            transform: scale(0.95);
+        }
+
+        .icon {
+            fill: #fff;
+            width: 20px;
+            height: 20px;
+        }
+
+        /* Fallback CSS */
+        .fallback-orb {
+            display: none;
+            width: 200px;
+            height: 200px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(115,38,242,0.6) 0%, rgba(31,217,115,0.2) 50%, transparent 70%);
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            transition: transform 0.1s linear, opacity 0.1s linear;
+        }
+
+        body.no-webgl .fallback-orb {
+            display: block;
+        }
+        body.no-webgl #glcanvas {
+            display: none;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 0.3; }
+            100% { opacity: 0.8; }
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="glcanvas"></canvas>
+    
+    <div class="fallback-orb" id="css-orb"></div>
+
+    <div class="ui-layer" id="intro">
+        <div class="title">BREATH FIELD</div>
+        <div class="subtext">4-7-8 vagal activation &middot; tap to synchronize</div>
+    </div>
+
+    <div class="ui-layer" id="hud">
+        <div class="center-hud">
+            <div id="phase-text">INHALE</div>
+            <div class="progress-container">
+                <div id="progress-bar"></div>
+            </div>
+        </div>
+        
+        <div class="bottom-hud">
+            <div id="cycle-counter">CYCLE 1 / 4</div>
+            <div class="ctrl-btn" id="play-pause">
+                <svg class="icon pause-icon" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                <svg class="icon play-icon" viewBox="0 0 24 24" style="display:none;"><path d="M8 5v14l11-7z"/></svg>
+            </div>
+        </div>
+    </div>
+
+<script>
+/**
+ * ARCHITECTURE:
+ * Phase timings: Inhale (4s), Hold (7s), Exhale (8s). Cycle = 19s.
+ * WebGL: Procedural noise displacement map on high-density plane.
+ * Web Audio API: 136.1Hz base + Pink Noise Lowpass filter driven by phase state.
+ */
+
+const STATE = {
+    isRunning: false,
+    cycleStartTime: 0,
+    cycleCount: 1,
+    currentPhase: -1, // 0=Inhale, 1=Hold, 2=Exhale
+    phaseProgress: 0,
+    totalTime: 0
+};
+
+// --- DOM ELEMENTS ---
+const introEl = document.getElementById('intro');
+const hudEl = document.getElementById('hud');
+const phaseTextEl = document.getElementById('phase-text');
+const progressBarEl = document.getElementById('progress-bar');
+const cycleCounterEl = document.getElementById('cycle-counter');
+const playPauseBtn = document.getElementById('play-pause');
+const cssOrb = document.getElementById('css-orb');
+
+// --- WAKE LOCK ---
+let wakeLock = null;
+const requestWakeLock = async () => {
+    try {
+        if ('wakeLock' in navigator) {
+            wakeLock = await navigator.wakeLock.request('screen');
+        }
+    } catch (err) {}
+};
+document.addEventListener('visibilitychange', () => {
+    if (wakeLock !== null && document.visibilityState === 'visible' && STATE.isRunning) requestWakeLock();
+});
+
+// --- AUDIO ENGINE ---
+const AudioEngine = (() => {
+    let ctx;
+    let masterGain;
+    let baseDrone, subDrone;
+    let pinkNoiseBuffer, pinkNoiseSource;
+    let filter;
+    let lfo, lfoGain;
+    let nextCycleScheduleTime = 0;
+
+    const init = () => {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        ctx = new AudioContext();
+        masterGain = ctx.createGain();
+        masterGain.gain.value = 0.04;
+        masterGain.connect(ctx.destination);
+
+        // Om Frequencies
+        baseDrone = ctx.createOscillator();
+        baseDrone.type = 'sine';
+        baseDrone.frequency.value = 136.1;
+        
+        subDrone = ctx.createOscillator();
+        subDrone.type = 'triangle';
+        subDrone.frequency.value = 68.05;
+
+        const droneGain = ctx.createGain();
+        droneGain.gain.value = 0.5;
+        baseDrone.connect(droneGain);
+        subDrone.connect(droneGain);
+        droneGain.connect(masterGain);
+
+        baseDrone.start();
+        subDrone.start();
+
+        // Pink Noise Generator
+        const bufferSize = 4096;
+        pinkNoiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+        const output = pinkNoiseBuffer.getChannelData(0);
+        let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+        for (let i = 0; i < bufferSize; i++) {
+            let white = Math.random() * 2 - 1;
+            b0 = 0.99886 * b0 + white * 0.0555179;
+            b1 = 0.99332 * b1 + white * 0.0750759;
+            b2 = 0.96900 * b2 + white * 0.1538520;
+            b3 = 0.86650 * b3 + white * 0.3104856;
+            b4 = 0.55000 * b4 + white * 0.5329522;
+            b5 = -0.7616 * b5 - white * 0.0168980;
+            output[i] = b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362;
+            output[i] *= 0.11;
+            b6 = white * 0.115926;
+        }
+
+        pinkNoiseSource = ctx.createBufferSource();
+        pinkNoiseSource.buffer = pinkNoiseBuffer;
+        pinkNoiseSource.loop = true;
+
+        filter = ctx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.Q.value = 1.5;
+        filter.frequency.value = 100;
+
+        pinkNoiseSource.connect(filter);
+        filter.connect(masterGain);
+        pinkNoiseSource.start();
+
+        // LFO for Hold Phase
+        lfo = ctx.createOscillator();
+        lfo.type = 'sine';
+        lfo.frequency.value = 0.2;
+        lfoGain = ctx.createGain();
+        lfoGain.gain.value = 0;
+        lfo.connect(lfoGain);
+        lfoGain.connect(filter.detune);
+        lfo.start();
+    };
+
+    const triggerBell = (freq, time) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        osc.connect(gain);
+        gain.connect(masterGain);
+
+        gain.gain.setValueAtTime(0, time);
+        gain.gain.linearRampToValueAtTime(0.4, time + 0.05);
+        gain.gain.exponentialRampToValueAtTime(0.001, time + 4);
+
+        osc.start(time);
+        osc.stop(time + 4);
+    };
+
+    const scheduleAutomation = () => {
+        const now = ctx.currentTime;
+        if (now >= nextCycleScheduleTime - 0.5) {
+            const start = nextCycleScheduleTime === 0 ? now : nextCycleScheduleTime;
+            
+            // Inhale 0-4
+            filter.frequency.setValueAtTime(200, start);
+            filter.frequency.exponentialRampToValueAtTime(2400, start + 4);
+            lfoGain.gain.setValueAtTime(0, start);
+
+            // Hold 4-11
+            filter.frequency.setValueAtTime(2300, start + 4.01);
+            lfoGain.gain.setTargetAtTime(300, start + 4.1, 0.5);
+
+            // Exhale 11-19
+            lfoGain.gain.setValueAtTime(0, start + 11);
+            filter.frequency.setValueAtTime(2400, start + 11.01);
+            filter.frequency.exponentialRampToValueAtTime(100, start + 19);
+
+            triggerBell(432, start);        // Inhale Marker
+            triggerBell(528, start + 4);    // Hold Marker
+            triggerBell(216, start + 11);   // Exhale Marker
+
+            if (nextCycleScheduleTime === 0) STATE.cycleStartTime = start;
+            nextCycleScheduleTime = start + 19;
+        }
+    };
+
+    return {
+        init,
+        scheduleAutomation,
+        resume: () => ctx && ctx.resume(),
+        suspend: () => ctx && ctx.suspend(),
+        getCurrentTime: () => ctx ? ctx.currentTime : 0
+    };
+})();
+
+
+// --- WEBGL ENGINE ---
+const WebGLEngine = (() => {
+    let canvas, gl;
+    let program, buffers;
+    let uniforms = {};
+
+    const vertexShaderSource = `
+        attribute vec3 aPosition;
+        uniform mat4 uProjection;
+        uniform mat4 uModelView;
+        uniform float uTime;
+        uniform int uPhase;
+        uniform float uProgress;
+        varying float vHeight;
+
+        // Ashima 3D Simplex Noise
+        vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+        vec4 mod289(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+        vec4 permute(vec4 x) { return mod289(((x*34.0)+1.0)*x); }
+        vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
+        float snoise(vec3 v) {
+            const vec2 C = vec2(1.0/6.0, 1.0/3.0);
+            const vec4 D = vec4(0.0, 0.5, 1.0, 2.0);
+            vec3 i  = floor(v + dot(v, C.yyy));
+            vec3 x0 = v - i + dot(i, C.xxx);
+            vec3 g = step(x0.yzx, x0.xyz);
+            vec3 l = 1.0 - g;
+            vec3 i1 = min( g.xyz, l.zxy );
+            vec3 i2 = max( g.xyz, l.zxy );
+            vec3 x1 = x0 - i1 + C.xxx;
+            vec3 x2 = x0 - i2 + C.yyy;
+            vec3 x3 = x0 - D.yyy;
+            i = mod289(i);
+            vec4 p = permute( permute( permute(
+                        i.z + vec4(0.0, i1.z, i2.z, 1.0 ))
+                      + i.y + vec4(0.0, i1.y, i2.y, 1.0 ))
+                      + i.x + vec4(0.0, i1.x, i2.x, 1.0 ));
+            float n_ = 0.142857142857;
+            vec3  ns = n_ * D.wyz - D.xzx;
+            vec4 j = p - 49.0 * floor(p * ns.z * ns.z);
+            vec4 x_ = floor(j * ns.z);
+            vec4 y_ = floor(j - 7.0 * x_ );
+            vec4 x = x_ *ns.x + ns.yyyy;
+            vec4 y = y_ *ns.x + ns.yyyy;
+            vec4 h = 1.0 - abs(x) - abs(y);
+            vec4 b0 = vec4( x.xy, y.xy );
+            vec4 b1 = vec4( x.zw, y.zw );
+            vec4 s0 = floor(b0)*2.0 + 1.0;
+            vec4 s1 = floor(b1)*2.0 + 1.0;
+            vec4 sh = -step(h, vec4(0.0));
+            vec4 a0 = b0.xzyw + s0.xzyw*sh.xxyy ;
+            vec4 a1 = b1.xzyw + s1.xzyw*sh.zzww ;
+            vec3 p0 = vec3(a0.xy,h.x);
+            vec3 p1 = vec3(a0.zw,h.y);
+            vec3 p2 = vec3(a1.xy,h.z);
+            vec3 p3 = vec3(a1.zw,h.w);
+            vec4 norm = taylorInvSqrt(vec4(dot(p0,p0), dot(p1,p1), dot(p2, p2), dot(p3,p3)));
+            p0 *= norm.x; p1 *= norm.y; p2 *= norm.z; p3 *= norm.w;
+            vec4 m = max(0.6 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.0);
+            m = m * m;
+            return 42.0 * dot( m*m, vec4( dot(p0,x0), dot(p1,x1), dot(p2,x2), dot(p3,x3) ) );
+        }
+
+        void main() {
+            float amp = 0.1;
+            float speed = 0.3;
+            float yOffset = -0.6;
+
+            if (uPhase == 0) { // Inhale
+                amp = mix(0.1, 1.4, uProgress);
+                speed = 0.6;
+                yOffset = mix(-0.6, 0.0, uProgress);
+            } else if (uPhase == 1) { // Hold
+                amp = 1.4;
+                speed = 0.1;
+                yOffset = 0.0;
+            } else if (uPhase == 2) { // Exhale
+                amp = mix(1.4, 0.05, uProgress);
+                speed = 0.4;
+                yOffset = mix(0.0, -0.6, uProgress);
+            }
+
+            // Base displacement
+            float n = snoise(vec3(aPosition.x * 1.5, aPosition.y * 1.5 + (uTime * speed), uTime * 0.2));
+            
+            // Hold phase tension ripples
+            if (uPhase == 1) {
+                n += snoise(vec3(aPosition.x * 8.0, aPosition.y * 8.0, uTime * 1.5)) * 0.1;
+            }
+
+            vec3 pos = aPosition;
+            pos.y += n * amp + yOffset;
+
+            // Flatten logic during exhale
+            if (uPhase == 2) {
+                pos.y = mix(pos.y, -0.8, uProgress * 0.9);
+            }
+
+            vHeight = pos.y;
+            gl_Position = uProjection * uModelView * vec4(pos, 1.0);
+        }
+    `;
+
+    const fragmentShaderSource = `
+        precision mediump float;
+        varying float vHeight;
+        uniform vec2 uResolution;
+        uniform float uTime;
+
+        float rand(vec2 co){ return fract(sin(dot(co.xy ,vec2(12.9898,78.233))) * 43758.5453); }
+
+        void main() {
+            vec3 cBase = vec3(0.12, 0.85, 0.45); // Emerald
+            vec3 cCrest = vec3(0.45, 0.15, 0.95); // Violet
+            
+            float hMap = clamp((vHeight + 0.5) * 0.6, 0.0, 1.0);
+            vec3 color = mix(cBase, cCrest, hMap);
+
+            float alpha = smoothstep(-1.2, 1.0, vHeight) * 0.35;
+            
+            // Post-process simulation (grain & vertical attenuation)
+            vec2 uv = gl_FragCoord.xy / uResolution.xy;
+            color += (rand(uv * uTime) - 0.5) * 0.04;
+            alpha *= smoothstep(0.0, 0.2, uv.y) * smoothstep(1.0, 0.7, uv.y);
+
+            gl_FragColor = vec4(color, alpha);
+        }
+    `;
+
+    const compileShader = (type, source) => {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) return null;
+        return shader;
+    };
+
+    const init = () => {
+        canvas = document.getElementById('glcanvas');
+        gl = canvas.getContext('webgl', { alpha: false, antialias: true }) || 
+             canvas.getContext('experimental-webgl');
+             
+        if (!gl) throw new Error("WebGL not supported");
+
+        const vs = compileShader(gl.VERTEX_SHADER, vertexShaderSource);
+        const fs = compileShader(gl.FRAGMENT_SHADER, fragmentShaderSource);
+
+        program = gl.createProgram();
+        gl.attachShader(program, vs);
+        gl.attachShader(program, fs);
+        gl.linkProgram(program);
+        gl.useProgram(program);
+
+        // Plane Geometry
+        const width = 150, height = 40;
+        const positions = [];
+        const indices = [];
+
+        for(let y=0; y<=height; y++) {
+            for(let x=0; x<=width; x++) {
+                positions.push((x/width)*4-2, (y/height)*4-2, 0); 
+            }
+        }
+
+        for(let y=0; y<height; y++) {
+            for(let x=0; x<width; x++) {
+                const p1 = y*(width+1)+x, p2 = p1+1, p3 = (y+1)*(width+1)+x, p4 = p3+1;
+                indices.push(p1,p2,p3, p2,p4,p3);
+            }
+        }
+
+        buffers = {
+            position: gl.createBuffer(),
+            index: gl.createBuffer(),
+            indexCount: indices.length
+        };
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffers.position);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffers.index);
+        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
+
+        const aPosition = gl.getAttribLocation(program, "aPosition");
+        gl.enableVertexAttribArray(aPosition);
+        gl.vertexAttribPointer(aPosition, 3, gl.FLOAT, false, 0, 0);
+
+        uniforms = {
+            uProjection: gl.getUniformLocation(program, "uProjection"),
+            uModelView: gl.getUniformLocation(program, "uModelView"),
+            uTime: gl.getUniformLocation(program, "uTime"),
+            uPhase: gl.getUniformLocation(program, "uPhase"),
+            uProgress: gl.getUniformLocation(program, "uProgress"),
+            uResolution: gl.getUniformLocation(program, "uResolution")
+        };
+
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+        gl.clearColor(0.02, 0.02, 0.03, 1.0);
+
+        resize();
+        window.addEventListener('resize', resize);
+    };
+
+    const resize = () => {
+        canvas.width = window.innerWidth * window.devicePixelRatio;
+        canvas.height = window.innerHeight * window.devicePixelRatio;
+        gl.viewport(0, 0, canvas.width, canvas.height);
+        
+        gl.useProgram(program);
+        gl.uniform2f(uniforms.uResolution, canvas.width, canvas.height);
+
+        const projection = new Float32Array(16);
+        const aspect = canvas.width / canvas.height;
+        const f = 1.0 / Math.tan((45 * Math.PI / 180) / 2);
+        projection[0] = f / aspect; projection[5] = f; 
+        projection[10] = -1; projection[11] = -1; projection[14] = -2;
+        
+        const modelView = new Float32Array([
+            1,0,0,0,  0,0.5,-0.866,0,  0,0.866,0.5,0,  0,0,-4,1
+        ]); // Tilt plane backward
+
+        gl.uniformMatrix4fv(uniforms.uProjection, false, projection);
+        gl.uniformMatrix4fv(uniforms.uModelView, false, modelView);
+    };
+
+    const render = (time, phase, progress) => {
+        if (!gl) return;
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        gl.useProgram(program);
+
+        gl.uniform1f(uniforms.uTime, time);
+        gl.uniform1i(uniforms.uPhase, phase);
+        gl.uniform1f(uniforms.uProgress, progress);
+
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffers.index);
+        gl.drawElements(gl.TRIANGLES, buffers.indexCount, gl.UNSIGNED_SHORT, 0);
+    };
+
+    return { init, render };
+})();
+
+
+// --- CORE LOOP & STATE MANAGEMENT ---
+const tick = () => {
+    if (!STATE.isRunning) {
+        requestAnimationFrame(tick);
+        return;
+    }
+
+    AudioEngine.scheduleAutomation();
+    
+    const audioTime = AudioEngine.getCurrentTime();
+    STATE.totalTime = audioTime;
+    let t = audioTime - STATE.cycleStartTime;
+
+    // Boundary check for cycle advance
+    if (t >= 19.0) {
+        STATE.cycleStartTime += 19;
+        t = 0;
+        STATE.cycleCount++;
+        cycleCounterEl.innerText = `CYCLE ${STATE.cycleCount} / ∞`;
+    }
+
+    let phase = 0;
+    let progress = 0;
+    let text = "INHALE";
+
+    if (t < 4.0) {
+        phase = 0; progress = t / 4.0; text = "INHALE";
+    } else if (t < 11.0) {
+        phase = 1; progress = (t - 4.0) / 7.0; text = "HOLD";
+    } else {
+        phase = 2; progress = (t - 11.0) / 8.0; text = "EXHALE";
+    }
+
+    // Phase UI Transitions
+    if (phase !== STATE.currentPhase) {
+        STATE.currentPhase = phase;
+        phaseTextEl.innerText = text;
+        phaseTextEl.style.opacity = 0;
+        setTimeout(() => phaseTextEl.style.opacity = 0.6, 50);
+    }
+    
+    // Fade out 0.5s before end
+    const timeRemaining = (phase === 0 ? 4.0 : (phase === 1 ? 11.0 : 19.0)) - t;
+    if (timeRemaining < 0.5) phaseTextEl.style.opacity = 0;
+
+    progressBarEl.style.width = `${progress * 100}%`;
+
+    // Render logic
+    try {
+        WebGLEngine.render(STATE.totalTime, phase, progress);
+    } catch (e) {
+        updateCSSFallback(phase, progress);
+    }
+
+    requestAnimationFrame(tick);
+};
+
+const updateCSSFallback = (phase, progress) => {
+    let scale = 1, opacity = 0.5;
+    if (phase === 0) { scale = 1 + (progress * 1.5); opacity = 0.5 + (progress * 0.5); }
+    else if (phase === 1) { scale = 2.5; opacity = 1.0; }
+    else if (phase === 2) { scale = 2.5 - (progress * 1.5); opacity = 1.0 - (progress * 0.5); }
+    cssOrb.style.transform = `translate(-50%, -50%) scale(${scale})`;
+    cssOrb.style.opacity = opacity;
+};
+
+// --- INITIALIZATION ---
+introEl.addEventListener('click', async () => {
+    introEl.style.opacity = 0;
+    introEl.style.pointerEvents = 'none';
+    
+    try {
+        WebGLEngine.init();
+    } catch (e) {
+        document.body.classList.add('no-webgl');
+    }
+
+    AudioEngine.init();
+    requestWakeLock();
+    
+    STATE.isRunning = true;
+    setTimeout(() => hudEl.style.opacity = 1, 1000);
+    requestAnimationFrame(tick);
+});
+
+playPauseBtn.addEventListener('click', () => {
+    STATE.isRunning = !STATE.isRunning;
+    const playIcon = document.querySelector('.play-icon');
+    const pauseIcon = document.querySelector('.pause-icon');
+    
+    if (STATE.isRunning) {
+        AudioEngine.resume();
+        requestWakeLock();
+        playIcon.style.display = 'none';
+        pauseIcon.style.display = 'block';
+    } else {
+        AudioEngine.suspend();
+        playIcon.style.display = 'block';
+        pauseIcon.style.display = 'none';
+        phaseTextEl.style.opacity = 0;
+    }
+});
+</script>
+</body>
+</html>
