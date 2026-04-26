@@ -8,6 +8,7 @@
         :root {
             --bg: #050508;
             --font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            --focus-ring: rgba(255, 255, 255, 0.8);
         }
 
         * {
@@ -66,6 +67,11 @@
             transition: opacity 1.5s cubic-bezier(0.4, 0, 0.2, 1);
             pointer-events: auto;
             cursor: pointer;
+            outline: none;
+        }
+
+        #intro:focus-visible {
+            box-shadow: inset 0 0 0 2px var(--focus-ring);
         }
 
         .title {
@@ -79,7 +85,7 @@
         .subtext {
             font-size: 0.75rem;
             font-weight: 400;
-            opacity: 0.5;
+            opacity: 0.65;
             letter-spacing: 0.05em;
             text-transform: uppercase;
             animation: pulse 3s infinite alternate;
@@ -145,7 +151,7 @@
             font-size: 0.7rem;
             font-weight: 500;
             letter-spacing: 0.1em;
-            opacity: 0.4;
+            opacity: 0.65;
             margin-bottom: 1.5rem;
         }
 
@@ -162,13 +168,19 @@
             align-items: center;
             cursor: pointer;
             transition: all 0.3s ease;
-            opacity: 0.3;
+            opacity: 0.4;
+            outline: none;
         }
 
         .ctrl-btn:active {
-            opacity: 0.8;
+            opacity: 0.9;
             background: rgba(255, 255, 255, 0.1);
             transform: scale(0.95);
+        }
+
+        .ctrl-btn:focus-visible {
+            opacity: 0.9;
+            box-shadow: 0 0 0 2px var(--focus-ring);
         }
 
         .icon {
@@ -199,8 +211,8 @@
         }
 
         @keyframes pulse {
-            0% { opacity: 0.3; }
-            100% { opacity: 0.8; }
+            0% { opacity: 0.45; }
+            100% { opacity: 0.85; }
         }
     </style>
 </head>
@@ -210,31 +222,30 @@
     
     <div class="fallback-orb" id="css-orb"></div>
 
-    <div class="ui-layer" id="intro">
+    <div class="ui-layer" id="intro" role="button" tabindex="0" aria-label="Start breath session">
         <div class="title">BREATH FIELD</div>
         <div class="subtext">4-7-8 vagal activation &middot; tap to synchronize</div>
     </div>
 
     <div class="ui-layer" id="hud">
         <div class="center-hud">
-            <div id="phase-text">INHALE</div>
+            <div id="phase-text" aria-live="polite">INHALE</div>
             <div class="progress-container">
                 <div id="progress-bar"></div>
             </div>
         </div>
         
         <div class="bottom-hud">
-            <div id="cycle-counter">CYCLE 1 / 4</div>
-            <div class="ctrl-btn" id="play-pause">
-                <svg class="icon pause-icon" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
-                <svg class="icon play-icon" viewBox="0 0 24 24" style="display:none;"><path d="M8 5v14l11-7z"/></svg>
+            <div id="cycle-counter" aria-live="polite">CYCLE 1 / 4</div>
+            <div class="ctrl-btn" id="play-pause" role="button" tabindex="0" aria-label="Pause session">
+                <svg class="icon pause-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                <svg class="icon play-icon" viewBox="0 0 24 24" style="display:none;" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
             </div>
         </div>
     </div>
 
 <script>
 /**
- * ARCHITECTURE:
  * Phase timings: Inhale (4s), Hold (7s), Exhale (8s). Cycle = 19s.
  * WebGL: Procedural noise displacement map on high-density plane.
  * Web Audio API: 136.1Hz base + Pink Noise Lowpass filter driven by phase state.
@@ -249,7 +260,7 @@ const STATE = {
     totalTime: 0
 };
 
-// --- DOM ELEMENTS ---
+// DOM Elements
 const introEl = document.getElementById('intro');
 const hudEl = document.getElementById('hud');
 const phaseTextEl = document.getElementById('phase-text');
@@ -257,10 +268,12 @@ const progressBarEl = document.getElementById('progress-bar');
 const cycleCounterEl = document.getElementById('cycle-counter');
 const playPauseBtn = document.getElementById('play-pause');
 const cssOrb = document.getElementById('css-orb');
+const playIcon = document.querySelector('.play-icon');
+const pauseIcon = document.querySelector('.pause-icon');
 
-// --- WAKE LOCK ---
+// Wake Lock
 let wakeLock = null;
-const requestWakeLock = async () => {
+const reqWakeLock = async () => {
     try {
         if ('wakeLock' in navigator) {
             wakeLock = await navigator.wakeLock.request('screen');
@@ -268,32 +281,30 @@ const requestWakeLock = async () => {
     } catch (err) {}
 };
 document.addEventListener('visibilitychange', () => {
-    if (wakeLock !== null && document.visibilityState === 'visible' && STATE.isRunning) requestWakeLock();
+    if (wakeLock !== null && document.visibilityState === 'visible' && STATE.isRunning) reqWakeLock();
 });
 
-// --- AUDIO ENGINE ---
+// Audio Engine
 const AudioEngine = (() => {
     let ctx;
     let masterGain;
-    let baseDrone, subDrone;
-    let pinkNoiseBuffer, pinkNoiseSource;
     let filter;
-    let lfo, lfoGain;
-    let nextCycleScheduleTime = 0;
+    let lfoGain;
+    let nextCycleTime = 0;
 
     const init = () => {
-        const AudioContext = window.AudioContext || window.webkitAudioContext;
-        ctx = new AudioContext();
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        ctx = new AudioContextClass();
         masterGain = ctx.createGain();
         masterGain.gain.value = 0.04;
         masterGain.connect(ctx.destination);
 
-        // Om Frequencies
-        baseDrone = ctx.createOscillator();
+        // Drones
+        const baseDrone = ctx.createOscillator();
         baseDrone.type = 'sine';
         baseDrone.frequency.value = 136.1;
         
-        subDrone = ctx.createOscillator();
+        const subDrone = ctx.createOscillator();
         subDrone.type = 'triangle';
         subDrone.frequency.value = 68.05;
 
@@ -306,11 +317,12 @@ const AudioEngine = (() => {
         baseDrone.start();
         subDrone.start();
 
-        // Pink Noise Generator
+        // Noise Filter
         const bufferSize = 4096;
-        pinkNoiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-        const output = pinkNoiseBuffer.getChannelData(0);
+        const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+        const output = noiseBuffer.getChannelData(0);
         let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+        
         for (let i = 0; i < bufferSize; i++) {
             let white = Math.random() * 2 - 1;
             b0 = 0.99886 * b0 + white * 0.0555179;
@@ -324,21 +336,21 @@ const AudioEngine = (() => {
             b6 = white * 0.115926;
         }
 
-        pinkNoiseSource = ctx.createBufferSource();
-        pinkNoiseSource.buffer = pinkNoiseBuffer;
-        pinkNoiseSource.loop = true;
+        const noiseSrc = ctx.createBufferSource();
+        noiseSrc.buffer = noiseBuffer;
+        noiseSrc.loop = true;
 
         filter = ctx.createBiquadFilter();
         filter.type = 'lowpass';
         filter.Q.value = 1.5;
         filter.frequency.value = 100;
 
-        pinkNoiseSource.connect(filter);
+        noiseSrc.connect(filter);
         filter.connect(masterGain);
-        pinkNoiseSource.start();
+        noiseSrc.start();
 
-        // LFO for Hold Phase
-        lfo = ctx.createOscillator();
+        // LFO
+        const lfo = ctx.createOscillator();
         lfo.type = 'sine';
         lfo.frequency.value = 0.2;
         lfoGain = ctx.createGain();
@@ -364,51 +376,47 @@ const AudioEngine = (() => {
         osc.stop(time + 4);
     };
 
-    const scheduleAutomation = () => {
+    const scheduleTimeline = () => {
         const now = ctx.currentTime;
-        if (now >= nextCycleScheduleTime - 0.5) {
-            const start = nextCycleScheduleTime === 0 ? now : nextCycleScheduleTime;
+        if (now >= nextCycleTime - 0.5) {
+            const start = nextCycleTime === 0 ? now : nextCycleTime;
             
-            // Inhale 0-4
             filter.frequency.setValueAtTime(200, start);
             filter.frequency.exponentialRampToValueAtTime(2400, start + 4);
             lfoGain.gain.setValueAtTime(0, start);
 
-            // Hold 4-11
             filter.frequency.setValueAtTime(2300, start + 4.01);
             lfoGain.gain.setTargetAtTime(300, start + 4.1, 0.5);
 
-            // Exhale 11-19
             lfoGain.gain.setValueAtTime(0, start + 11);
             filter.frequency.setValueAtTime(2400, start + 11.01);
             filter.frequency.exponentialRampToValueAtTime(100, start + 19);
 
-            triggerBell(432, start);        // Inhale Marker
-            triggerBell(528, start + 4);    // Hold Marker
-            triggerBell(216, start + 11);   // Exhale Marker
+            triggerBell(432, start);        // Inhale 
+            triggerBell(528, start + 4);    // Hold 
+            triggerBell(216, start + 11);   // Exhale 
 
-            if (nextCycleScheduleTime === 0) STATE.cycleStartTime = start;
-            nextCycleScheduleTime = start + 19;
+            if (nextCycleTime === 0) STATE.cycleStartTime = start;
+            nextCycleTime = start + 19;
         }
     };
 
     return {
         init,
-        scheduleAutomation,
+        scheduleTimeline,
         resume: () => ctx && ctx.resume(),
         suspend: () => ctx && ctx.suspend(),
-        getCurrentTime: () => ctx ? ctx.currentTime : 0
+        getTime: () => ctx ? ctx.currentTime : 0
     };
 })();
 
-
-// --- WEBGL ENGINE ---
+// WebGL Engine
 const WebGLEngine = (() => {
     let canvas, gl;
     let program, buffers;
     let uniforms = {};
 
-    const vertexShaderSource = `
+    const vertShader = `
         attribute vec3 aPosition;
         uniform mat4 uProjection;
         uniform mat4 uModelView;
@@ -417,11 +425,11 @@ const WebGLEngine = (() => {
         uniform float uProgress;
         varying float vHeight;
 
-        // Ashima 3D Simplex Noise
         vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
         vec4 mod289(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
         vec4 permute(vec4 x) { return mod289(((x*34.0)+1.0)*x); }
         vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
+        
         float snoise(vec3 v) {
             const vec2 C = vec2(1.0/6.0, 1.0/3.0);
             const vec4 D = vec4(0.0, 0.5, 1.0, 2.0);
@@ -470,24 +478,22 @@ const WebGLEngine = (() => {
             float speed = 0.3;
             float yOffset = -0.6;
 
-            if (uPhase == 0) { // Inhale
+            if (uPhase == 0) {
                 amp = mix(0.1, 1.4, uProgress);
                 speed = 0.6;
                 yOffset = mix(-0.6, 0.0, uProgress);
-            } else if (uPhase == 1) { // Hold
+            } else if (uPhase == 1) {
                 amp = 1.4;
                 speed = 0.1;
                 yOffset = 0.0;
-            } else if (uPhase == 2) { // Exhale
+            } else if (uPhase == 2) {
                 amp = mix(1.4, 0.05, uProgress);
                 speed = 0.4;
                 yOffset = mix(0.0, -0.6, uProgress);
             }
 
-            // Base displacement
             float n = snoise(vec3(aPosition.x * 1.5, aPosition.y * 1.5 + (uTime * speed), uTime * 0.2));
             
-            // Hold phase tension ripples
             if (uPhase == 1) {
                 n += snoise(vec3(aPosition.x * 8.0, aPosition.y * 8.0, uTime * 1.5)) * 0.1;
             }
@@ -495,7 +501,6 @@ const WebGLEngine = (() => {
             vec3 pos = aPosition;
             pos.y += n * amp + yOffset;
 
-            // Flatten logic during exhale
             if (uPhase == 2) {
                 pos.y = mix(pos.y, -0.8, uProgress * 0.9);
             }
@@ -505,7 +510,7 @@ const WebGLEngine = (() => {
         }
     `;
 
-    const fragmentShaderSource = `
+    const fragShader = `
         precision mediump float;
         varying float vHeight;
         uniform vec2 uResolution;
@@ -514,15 +519,14 @@ const WebGLEngine = (() => {
         float rand(vec2 co){ return fract(sin(dot(co.xy ,vec2(12.9898,78.233))) * 43758.5453); }
 
         void main() {
-            vec3 cBase = vec3(0.12, 0.85, 0.45); // Emerald
-            vec3 cCrest = vec3(0.45, 0.15, 0.95); // Violet
+            vec3 cBase = vec3(0.12, 0.85, 0.45);
+            vec3 cCrest = vec3(0.45, 0.15, 0.95);
             
             float hMap = clamp((vHeight + 0.5) * 0.6, 0.0, 1.0);
             vec3 color = mix(cBase, cCrest, hMap);
 
             float alpha = smoothstep(-1.2, 1.0, vHeight) * 0.35;
             
-            // Post-process simulation (grain & vertical attenuation)
             vec2 uv = gl_FragCoord.xy / uResolution.xy;
             color += (rand(uv * uTime) - 0.5) * 0.04;
             alpha *= smoothstep(0.0, 0.2, uv.y) * smoothstep(1.0, 0.7, uv.y);
@@ -531,7 +535,7 @@ const WebGLEngine = (() => {
         }
     `;
 
-    const compileShader = (type, source) => {
+    const createShader = (type, source) => {
         const shader = gl.createShader(type);
         gl.shaderSource(shader, source);
         gl.compileShader(shader);
@@ -544,10 +548,10 @@ const WebGLEngine = (() => {
         gl = canvas.getContext('webgl', { alpha: false, antialias: true }) || 
              canvas.getContext('experimental-webgl');
              
-        if (!gl) throw new Error("WebGL not supported");
+        if (!gl) throw new Error("WebGL fallback");
 
-        const vs = compileShader(gl.VERTEX_SHADER, vertexShaderSource);
-        const fs = compileShader(gl.FRAGMENT_SHADER, fragmentShaderSource);
+        const vs = createShader(gl.VERTEX_SHADER, vertShader);
+        const fs = createShader(gl.FRAGMENT_SHADER, fragShader);
 
         program = gl.createProgram();
         gl.attachShader(program, vs);
@@ -555,7 +559,6 @@ const WebGLEngine = (() => {
         gl.linkProgram(program);
         gl.useProgram(program);
 
-        // Plane Geometry
         const width = 150, height = 40;
         const positions = [];
         const indices = [];
@@ -574,15 +577,15 @@ const WebGLEngine = (() => {
         }
 
         buffers = {
-            position: gl.createBuffer(),
-            index: gl.createBuffer(),
-            indexCount: indices.length
+            pos: gl.createBuffer(),
+            idx: gl.createBuffer(),
+            count: indices.length
         };
 
-        gl.bindBuffer(gl.ARRAY_BUFFER, buffers.position);
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffers.pos);
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
 
-        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffers.index);
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffers.idx);
         gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
 
         const aPosition = gl.getAttribLocation(program, "aPosition");
@@ -616,13 +619,16 @@ const WebGLEngine = (() => {
 
         const projection = new Float32Array(16);
         const aspect = canvas.width / canvas.height;
-        const f = 1.0 / Math.tan((45 * Math.PI / 180) / 2);
-        projection[0] = f / aspect; projection[5] = f; 
-        projection[10] = -1; projection[11] = -1; projection[14] = -2;
+        const f = 1.0 / Math.tan(Math.PI / 8); 
+        projection[0] = f / aspect; 
+        projection[5] = f; 
+        projection[10] = -1; 
+        projection[11] = -1; 
+        projection[14] = -2;
         
         const modelView = new Float32Array([
             1,0,0,0,  0,0.5,-0.866,0,  0,0.866,0.5,0,  0,0,-4,1
-        ]); // Tilt plane backward
+        ]);
 
         gl.uniformMatrix4fv(uniforms.uProjection, false, projection);
         gl.uniformMatrix4fv(uniforms.uModelView, false, modelView);
@@ -637,28 +643,26 @@ const WebGLEngine = (() => {
         gl.uniform1i(uniforms.uPhase, phase);
         gl.uniform1f(uniforms.uProgress, progress);
 
-        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffers.index);
-        gl.drawElements(gl.TRIANGLES, buffers.indexCount, gl.UNSIGNED_SHORT, 0);
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffers.idx);
+        gl.drawElements(gl.TRIANGLES, buffers.count, gl.UNSIGNED_SHORT, 0);
     };
 
     return { init, render };
 })();
 
-
-// --- CORE LOOP & STATE MANAGEMENT ---
-const tick = () => {
+// Control Loop
+const loop = () => {
     if (!STATE.isRunning) {
-        requestAnimationFrame(tick);
+        requestAnimationFrame(loop);
         return;
     }
 
-    AudioEngine.scheduleAutomation();
+    AudioEngine.scheduleTimeline();
     
-    const audioTime = AudioEngine.getCurrentTime();
+    const audioTime = AudioEngine.getTime();
     STATE.totalTime = audioTime;
     let t = audioTime - STATE.cycleStartTime;
 
-    // Boundary check for cycle advance
     if (t >= 19.0) {
         STATE.cycleStartTime += 19;
         t = 0;
@@ -678,7 +682,6 @@ const tick = () => {
         phase = 2; progress = (t - 11.0) / 8.0; text = "EXHALE";
     }
 
-    // Phase UI Transitions
     if (phase !== STATE.currentPhase) {
         STATE.currentPhase = phase;
         phaseTextEl.innerText = text;
@@ -686,35 +689,41 @@ const tick = () => {
         setTimeout(() => phaseTextEl.style.opacity = 0.6, 50);
     }
     
-    // Fade out 0.5s before end
     const timeRemaining = (phase === 0 ? 4.0 : (phase === 1 ? 11.0 : 19.0)) - t;
     if (timeRemaining < 0.5) phaseTextEl.style.opacity = 0;
 
     progressBarEl.style.width = `${progress * 100}%`;
 
-    // Render logic
     try {
         WebGLEngine.render(STATE.totalTime, phase, progress);
     } catch (e) {
-        updateCSSFallback(phase, progress);
+        syncCSSFallback(phase, progress);
     }
 
-    requestAnimationFrame(tick);
+    requestAnimationFrame(loop);
 };
 
-const updateCSSFallback = (phase, progress) => {
+const syncCSSFallback = (phase, progress) => {
     let scale = 1, opacity = 0.5;
-    if (phase === 0) { scale = 1 + (progress * 1.5); opacity = 0.5 + (progress * 0.5); }
-    else if (phase === 1) { scale = 2.5; opacity = 1.0; }
-    else if (phase === 2) { scale = 2.5 - (progress * 1.5); opacity = 1.0 - (progress * 0.5); }
+    if (phase === 0) { 
+        scale = 1 + (progress * 1.5); 
+        opacity = 0.5 + (progress * 0.5); 
+    } else if (phase === 1) { 
+        scale = 2.5; 
+        opacity = 1.0; 
+    } else if (phase === 2) { 
+        scale = 2.5 - (progress * 1.5); 
+        opacity = 1.0 - (progress * 0.5); 
+    }
     cssOrb.style.transform = `translate(-50%, -50%) scale(${scale})`;
     cssOrb.style.opacity = opacity;
 };
 
-// --- INITIALIZATION ---
-introEl.addEventListener('click', async () => {
+const boot = async () => {
+    if (introEl.style.opacity === '0') return;
     introEl.style.opacity = 0;
     introEl.style.pointerEvents = 'none';
+    introEl.tabIndex = -1;
     
     try {
         WebGLEngine.init();
@@ -723,28 +732,45 @@ introEl.addEventListener('click', async () => {
     }
 
     AudioEngine.init();
-    requestWakeLock();
+    reqWakeLock();
     
     STATE.isRunning = true;
     setTimeout(() => hudEl.style.opacity = 1, 1000);
-    requestAnimationFrame(tick);
+    requestAnimationFrame(loop);
+};
+
+// Input Events
+introEl.addEventListener('click', boot);
+introEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        boot();
+    }
 });
 
-playPauseBtn.addEventListener('click', () => {
+const togglePlay = () => {
     STATE.isRunning = !STATE.isRunning;
-    const playIcon = document.querySelector('.play-icon');
-    const pauseIcon = document.querySelector('.pause-icon');
     
     if (STATE.isRunning) {
         AudioEngine.resume();
-        requestWakeLock();
+        reqWakeLock();
         playIcon.style.display = 'none';
         pauseIcon.style.display = 'block';
+        playPauseBtn.setAttribute('aria-label', 'Pause session');
     } else {
         AudioEngine.suspend();
         playIcon.style.display = 'block';
         pauseIcon.style.display = 'none';
         phaseTextEl.style.opacity = 0;
+        playPauseBtn.setAttribute('aria-label', 'Resume session');
+    }
+};
+
+playPauseBtn.addEventListener('click', togglePlay);
+playPauseBtn.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        togglePlay();
     }
 });
 </script>
